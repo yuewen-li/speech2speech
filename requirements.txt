@@ -1,0 +1,14 @@
+google-generativeai==0.3.2
+speechrecognition==3.10.0
+pyttsx3==2.90
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+pydantic==2.5.0
+python-dotenv==1.0.0
+sounddevice==0.4.6
+numpy==1.24.3
+requests==2.31.0
+flask==2.3.3
+soundfile==0.12.1
+langdetect==1.0.9
