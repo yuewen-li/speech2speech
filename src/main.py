@@ -30,9 +30,6 @@ def print_menu():
     print("\n📋 Available Options:")
     print("1. 🎤 Start Speech Translation (5 seconds)")
     print("2. 🎤 Start Speech Translation (until silence)")
-    print("3. 🔧 Test Speech Recognition")
-    print("4. 🔧 Test Translation Service")
-    print("5. 🔧 Test Text-to-Speech")
     print("6. 📊 Show System Information")
     print("7. ⚙️  Configure Settings")
     print("8. ❌ Exit")
@@ -147,15 +144,6 @@ def main():
                     print("✅ Translation completed successfully!")
                 else:
                     print("❌ Translation failed")
-                    
-            elif choice == "3":
-                test_speech_recognition(service)
-                
-            elif choice == "4":
-                test_translation(service)
-                
-            elif choice == "5":
-                test_tts(service)
                 
             elif choice == "6":
                 show_system_info(service)

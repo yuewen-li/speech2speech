@@ -1,0 +1,123 @@
+import asyncio
+import numpy as np
+import speech_recognition as sr
+import logging
+from typing import Optional, Callable, AsyncGenerator
+from collections import deque
+import threading
+import queue
+
+logger = logging.getLogger(__name__)
+
+
+class StreamingSpeechService:
+    """
+    Real-time streaming speech recognition service
+    """
+
+    def __init__(
+        self,
+        language: str,
+        sample_rate: int = 16000,
+        chunk_size: int = 1024,
+        buffer_duration: float = 2.0,
+    ):
+        self.sample_rate = sample_rate
+        self.chunk_size = chunk_size
+        self.buffer_duration = buffer_duration
+        self.buffer_size = int(sample_rate * buffer_duration)
+        self.language = language
+
+        # Audio buffer for streaming
+        self.audio_buffer = deque(maxlen=self.buffer_size)
+        self.is_recording = False
+        self.recognition_thread = None
+        self.audio_queue = queue.Queue()
+
+        # Speech recognition setup
+        self.recognizer = sr.Recognizer()
+        self.recognizer.energy_threshold = 4000
+        self.recognizer.dynamic_energy_threshold = True
+
+        # Callbacks
+        self.on_transcription = None
+        self.on_translation_ready = None
+
+    def set_callbacks(
+        self, on_transcription: Callable = None, on_translation_ready: Callable = None
+    ):
+        """Set callback functions for real-time events"""
+        self.on_transcription = on_transcription
+        self.on_translation_ready = on_translation_ready
+
+    async def start_streaming(self):
+        """Start the streaming recognition service"""
+        self.is_recording = True
+        self.recognition_thread = threading.Thread(target=self._recognition_worker)
+        self.recognition_thread.daemon = True
+        self.recognition_thread.start()
+        logger.info("Streaming speech recognition started")
+
+    def stop_streaming(self):
+        """Stop the streaming recognition service"""
+        self.is_recording = False
+        if self.recognition_thread:
+            self.recognition_thread.join(timeout=1.0)
+        logger.info("Streaming speech recognition stopped")
+
+    def add_audio_chunk(self, audio_chunk: np.ndarray):
+        """Add audio chunk to the streaming buffer"""
+        if self.is_recording:
+            self.audio_queue.put(audio_chunk)
+
+    def _recognition_worker(self):
+        """Background worker for continuous recognition"""
+        while self.is_recording:
+            try:
+                # Get audio chunk from queue
+                audio_chunk = self.audio_queue.get(timeout=0.1)
+
+                # Add to buffer
+                self.audio_buffer.extend(audio_chunk.flatten())
+
+                # Process buffer when it's full enough
+                if len(self.audio_buffer) >= self.buffer_size:
+                    self._process_audio_buffer()
+
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"Error in recognition worker: {e}")
+
+    def _process_audio_buffer(self):
+        """Process the current audio buffer for recognition"""
+        try:
+            # Convert buffer to numpy array
+            audio_data = np.array(list(self.audio_buffer), dtype=np.int16)
+
+            # Try to transcribe
+            transcribed_text = self._transcribe_audio(audio_data)
+            if transcribed_text:
+
+                # Call callbacks
+                if self.on_transcription:
+                    self.on_transcription(transcribed_text)
+
+                # Clear buffer after successful recognition
+                self.audio_buffer.clear()
+
+        except Exception as e:
+            logger.error(f"Error processing audio buffer: {e}")
+
+    def _transcribe_audio(self, audio_data: np.ndarray) -> Optional[str]:
+        """Transcribe audio data"""
+        try:
+            audio_bytes = audio_data.tobytes()
+            audio_data_sr = sr.AudioData(audio_bytes, self.sample_rate, 2)
+            text = self.recognizer.recognize_google(
+                audio_data_sr, language=self.language
+            )
+            return text
+        except Exception as e:
+            logger.error(f"Error transcribing audio: {e}")
+            return None
