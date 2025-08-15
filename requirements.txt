@@ -13,3 +13,4 @@ flask==2.3.3
 soundfile==0.12.1
 websockets==12.0
 asyncio-mqtt==0.16.1
+pyaudio==0.2.14

@@ -38,10 +38,15 @@ class StreamingTranslationServer:
         try:
             # Add to active connections
             self.active_connections.add(websocket)
+            init_msg = await websocket.recv()
+            data = json.loads(init_msg)
+            language = data.get("language", "en-US")
 
             # Create streaming service for this connection
             streaming_service = StreamingSpeechService(
-                sample_rate=Config.SAMPLE_RATE, chunk_size=Config.CHUNK_SIZE
+                language=language,
+                sample_rate=Config.SAMPLE_RATE,
+                chunk_size=Config.CHUNK_SIZE,
             )
 
             # Set up callbacks
