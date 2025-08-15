@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class StreamingTranslationClient:
     """WebSocket client for streaming translation"""
 
-    def __init__(self, language: str, server_url: str = "ws://localhost:8765"):
+    def __init__(self, language: str, server_url: str = "ws://localhost:8000"):
         self.server_url = server_url
         self.websocket = None
         self.language = language
@@ -31,7 +31,14 @@ class StreamingTranslationClient:
     async def connect(self):
         """Connect to the WebSocket server"""
         try:
-            self.websocket = await websockets.connect(self.server_url)
+            # Configure WebSocket client with ping/pong settings
+            self.websocket = await websockets.connect(
+                self.server_url,
+                ping_interval=20,  # Send ping every 20 seconds
+                ping_timeout=10,    # Wait 10 seconds for pong response
+                close_timeout=10    # Wait 10 seconds for close
+            )
+            
             init_msg = json.dumps({"language": self.language})
             await self.websocket.send(init_msg)
             logger.info(f"Connected to {self.server_url}")
@@ -140,6 +147,8 @@ class StreamingTranslationClient:
 
         except websockets.exceptions.ConnectionClosed:
             logger.info("Connection to server closed")
+        except websockets.exceptions.ConnectionClosedError as e:
+            logger.warning(f"Connection to server closed with error: {e}")
         except Exception as e:
             logger.error(f"Error listening for messages: {e}")
 
@@ -190,7 +199,8 @@ class StreamingTranslationClient:
 
 async def main():
     """Main function for the client"""
-    client = StreamingTranslationClient()
+    language = input("Select source language for translation: ").strip()
+    client = StreamingTranslationClient(language=language)
 
     try:
         # Connect to server

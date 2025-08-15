@@ -70,6 +70,8 @@ class StreamingTranslationServer:
 
         except websockets.exceptions.ConnectionClosed:
             logger.info("WebSocket connection closed")
+        except websockets.exceptions.ConnectionClosedError as e:
+            logger.error(f"WebSocket connection closed with error: {e}")
         except Exception as e:
             logger.error(f"Error handling WebSocket connection: {e}")
         finally:
@@ -85,9 +87,9 @@ class StreamingTranslationServer:
             if message_type == "audio_chunk":
                 await self._handle_audio_chunk(websocket, data)
             elif message_type == "start_streaming":
-                await self._handle_start_streaming(websocket, data)
+                await self._handle_start_streaming(websocket)
             elif message_type == "stop_streaming":
-                await self._handle_stop_streaming(websocket, data)
+                await self._handle_stop_streaming(websocket)
             elif message_type == "ping":
                 await websocket.send(json.dumps({"type": "pong"}))
             else:
@@ -233,7 +235,15 @@ class StreamingTranslationServer:
     async def start_server(self, host: str = "0.0.0.0", port: int = 8765):
         """Start the WebSocket server"""
         try:
-            server = await websockets.serve(self.handle_connection, host, port)
+            # Configure WebSocket server with ping/pong settings
+            server = await websockets.serve(
+                self.handle_connection, 
+                host, 
+                port,
+                ping_interval=20,  # Send ping every 20 seconds
+                ping_timeout=10,    # Wait 10 seconds for pong response
+                close_timeout=10    # Wait 10 seconds for close
+            )
 
             logger.info(f"WebSocket streaming server started on ws://{host}:{port}")
 

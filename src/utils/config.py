@@ -22,7 +22,7 @@ class Config:
 
     # Server Configuration
     HOST = os.getenv("HOST", "0.0.0.0")
-    PORT = int(os.getenv("PORT", "8000"))
+    PORT = int(os.getenv("PORT", "8765"))
 
     # Translation prompts
     ZH_TO_EN_PROMPT = """
