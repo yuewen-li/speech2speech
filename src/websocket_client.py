@@ -5,6 +5,7 @@ import pyaudio
 import wave
 import base64
 import logging
+from src.utils.config import Config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,9 +21,9 @@ class StreamingTranslationClient:
 
         # Audio setup
         self.audio = pyaudio.PyAudio()
-        self.sample_rate = 16000
-        self.chunk_size = 1024
-        self.channels = 1
+        self.sample_rate = Config.SAMPLE_RATE
+        self.chunk_size = Config.CHUNK_SIZE
+        self.channels = Config.CHANNELS
         self.format = pyaudio.paInt16
 
         # Streaming state
@@ -35,10 +36,10 @@ class StreamingTranslationClient:
             self.websocket = await websockets.connect(
                 self.server_url,
                 ping_interval=20,  # Send ping every 20 seconds
-                ping_timeout=10,    # Wait 10 seconds for pong response
-                close_timeout=10    # Wait 10 seconds for close
+                ping_timeout=10,  # Wait 10 seconds for pong response
+                close_timeout=10,  # Wait 10 seconds for close
             )
-            
+
             init_msg = json.dumps({"language": self.language})
             await self.websocket.send(init_msg)
             logger.info(f"Connected to {self.server_url}")

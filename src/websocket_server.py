@@ -3,8 +3,6 @@ import websockets
 import json
 import logging
 import numpy as np
-import soundfile as sf
-import io
 import base64
 from typing import Dict, Set
 from src.service.streaming_speech_service import StreamingSpeechService
@@ -41,6 +39,9 @@ class StreamingTranslationServer:
             init_msg = await websocket.recv()
             data = json.loads(init_msg)
             language = data.get("language", "en-US")
+            logger.info(
+                f"New connection from {websocket.remote_address} for language: {language}"
+            )
 
             # Create streaming service for this connection
             streaming_service = StreamingSpeechService(
@@ -109,18 +110,7 @@ class StreamingTranslationServer:
                 return
 
             audio_bytes = base64.b64decode(audio_base64)
-
-            # Convert to numpy array
-            audio_data, sample_rate = sf.read(io.BytesIO(audio_bytes))
-
-            # Resample if necessary
-            if sample_rate != Config.SAMPLE_RATE:
-                # Simple resampling (in production, use proper resampling)
-                audio_data = audio_data[:: sample_rate // Config.SAMPLE_RATE]
-
-            # Convert to int16
-            if audio_data.dtype != np.int16:
-                audio_data = (audio_data * 32767).astype(np.int16)
+            audio_data = np.frombuffer(audio_bytes, dtype=np.int16)
 
             # Add to streaming service
             streaming_service = self.connection_services.get(websocket)
@@ -232,17 +222,17 @@ class StreamingTranslationServer:
         except Exception as e:
             logger.error(f"Error cleaning up connection: {e}")
 
-    async def start_server(self, host: str = "0.0.0.0", port: int = 8765):
+    async def start_server(self, host: str = "0.0.0.0", port: int = 8000):
         """Start the WebSocket server"""
         try:
             # Configure WebSocket server with ping/pong settings
             server = await websockets.serve(
-                self.handle_connection, 
-                host, 
+                self.handle_connection,
+                host,
                 port,
                 ping_interval=20,  # Send ping every 20 seconds
-                ping_timeout=10,    # Wait 10 seconds for pong response
-                close_timeout=10    # Wait 10 seconds for close
+                ping_timeout=10,  # Wait 10 seconds for pong response
+                close_timeout=10,  # Wait 10 seconds for close
             )
 
             logger.info(f"WebSocket streaming server started on ws://{host}:{port}")

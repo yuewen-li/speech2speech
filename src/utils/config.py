@@ -9,7 +9,7 @@ class Config:
     # Gemini API Configuration
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-    TRANSLATION_SERVICE_MODEL = 'gemini-2.0-flash-lite'
+    TRANSLATION_SERVICE_MODEL = "gemini-2.0-flash-lite"
 
     # Speech Recognition Configuration
     LANGUAGE_ZH = os.getenv("LANGUAGE_ZH", "zh-CN")
@@ -22,7 +22,7 @@ class Config:
 
     # Server Configuration
     HOST = os.getenv("HOST", "0.0.0.0")
-    PORT = int(os.getenv("PORT", "8765"))
+    PORT = int(os.getenv("PORT", "8000"))
 
     # Translation prompts
     ZH_TO_EN_PROMPT = """
@@ -40,4 +40,3 @@ class Config:
     
     English text: {text}
     """
-
