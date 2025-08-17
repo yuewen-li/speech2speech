@@ -31,8 +31,8 @@ class StreamingSpeechService:
         # Audio buffer for streaming
         self.audio_buffer = deque(maxlen=self.buffer_size)
         self.is_recording = False
-        self.recognition_thread = None
-        self.audio_queue = queue.Queue()
+        # self.recognition_thread = None
+        self.audio_queue = asyncio.Queue()
 
         # Speech recognition setup
         self.recognizer = sr.Recognizer()
@@ -53,43 +53,41 @@ class StreamingSpeechService:
     async def start_streaming(self):
         """Start the streaming recognition service"""
         self.is_recording = True
-        self.recognition_thread = threading.Thread(target=self._recognition_worker)
-        self.recognition_thread.daemon = True
-        self.recognition_thread.start()
+        self.recognition_task = asyncio.create_task(self._recognition_worker())
         logger.info("Streaming speech recognition started")
 
-    def stop_streaming(self):
+    async def stop_streaming(self):
         """Stop the streaming recognition service"""
         self.is_recording = False
-        if self.recognition_thread:
-            self.recognition_thread.join(timeout=1.0)
+        if self.recognition_task:
+            await self.recognition_task
         logger.info("Streaming speech recognition stopped")
 
-    def add_audio_chunk(self, audio_chunk: np.ndarray):
+    async def add_audio_chunk(self, audio_chunk: np.ndarray):
         """Add audio chunk to the streaming buffer"""
         if self.is_recording:
-            self.audio_queue.put(audio_chunk)
+            await self.audio_queue.put(audio_chunk)
 
-    def _recognition_worker(self):
+    async def _recognition_worker(self):
         """Background worker for continuous recognition"""
         while self.is_recording:
             try:
                 # Get audio chunk from queue
-                audio_chunk = self.audio_queue.get(timeout=0.1)
+                audio_chunk = await self.audio_queue.get()
 
                 # Add to buffer
                 self.audio_buffer.extend(audio_chunk.flatten())
 
                 # Process buffer when it's full enough
                 if len(self.audio_buffer) >= self.buffer_size:
-                    self._process_audio_buffer()
+                    await self._process_audio_buffer()
 
-            except queue.Empty:
+            except asyncio.Queue.Empty:
                 continue
             except Exception as e:
                 logger.error(f"Error in recognition worker: {e}")
 
-    def _process_audio_buffer(self):
+    async def _process_audio_buffer(self):
         """Process the current audio buffer for recognition"""
         try:
             # Convert buffer to numpy array
@@ -101,7 +99,7 @@ class StreamingSpeechService:
 
                 # Call callbacks
                 if self.on_transcription:
-                    self.on_transcription(transcribed_text)
+                    await self.on_transcription(transcribed_text)
 
                 # Clear buffer after successful recognition
                 self.audio_buffer.clear()

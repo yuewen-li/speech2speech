@@ -115,7 +115,7 @@ class StreamingTranslationServer:
             # Add to streaming service
             streaming_service = self.connection_services.get(websocket)
             if streaming_service:
-                streaming_service.add_audio_chunk(audio_data)
+                await streaming_service.add_audio_chunk(audio_data)
 
         except Exception as e:
             logger.error(f"Error handling audio chunk: {e}")
@@ -144,7 +144,7 @@ class StreamingTranslationServer:
         try:
             streaming_service = self.connection_services.get(websocket)
             if streaming_service:
-                streaming_service.stop_streaming()
+                await streaming_service.stop_streaming()
                 await websocket.send(
                     json.dumps({"type": "streaming_stopped", "status": "success"})
                 )
@@ -209,7 +209,7 @@ class StreamingTranslationServer:
             # Stop streaming service
             streaming_service = self.connection_services.get(websocket)
             if streaming_service:
-                streaming_service.stop_streaming()
+                await streaming_service.stop_streaming()
                 del self.connection_services[websocket]
 
             # Remove from active connections
