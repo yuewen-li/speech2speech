@@ -122,23 +122,18 @@ class StreamingTranslationClient:
                 data = json.loads(message)
                 message_type = data.get("type")
 
-                if message_type == "transcription":
-                    print(f"Transcribed: {data.get('text')}")
-
-                elif message_type == "translation_ready":
-                    print(
-                        f"Translation: {data.get('original_text')} → {data.get('translated_text')}"
-                    )
+                if message_type == "translation_ready":
+                    logger.info(f"Translation finished, playing audio")
 
                     # Play translated audio
                     audio_data = base64.b64decode(data.get("audio_data"))
                     await self._play_audio(audio_data)
 
                 elif message_type == "streaming_started":
-                    print("Streaming started successfully")
+                    logger.info("Streaming started successfully")
 
                 elif message_type == "streaming_stopped":
-                    print("Streaming stopped")
+                    logger.info("Streaming stopped")
 
                 elif message_type == "pong":
                     pass  # Ignore pong messages
@@ -154,34 +149,30 @@ class StreamingTranslationClient:
             logger.error(f"Error listening for messages: {e}")
 
     async def _play_audio(self, audio_data: bytes):
-        """Play audio data"""
+        """Play audio data received as a WAV file in memory"""
         try:
-            # Save to temporary file
-            import tempfile
-            import os
+            import io
 
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-                f.write(audio_data)
-                temp_filename = f.name
+            with io.BytesIO(audio_data) as audio_file:
+                with wave.open(audio_file, "rb") as wf:
+                    # Open PyAudio stream
+                    stream = self.audio.open(
+                        format=self.audio.get_format_from_width(wf.getsampwidth()),
+                        channels=wf.getnchannels(),
+                        rate=wf.getframerate(),
+                        output=True,
+                    )
 
-            # Play audio
-            stream = self.audio.open(
-                format=self.format,
-                channels=self.channels,
-                rate=self.sample_rate,
-                output=True,
-            )
+                    # Read and play audio in chunks
+                    chunk_size = 1024
+                    data = wf.readframes(chunk_size)
+                    while data:
+                        stream.write(data)
+                        data = wf.readframes(chunk_size)
 
-            # Read and play
-            with wave.open(temp_filename, "rb") as wf:
-                data = wf.readframes(wf.getnframes())
-                stream.write(data)
-
-            stream.stop_stream()
-            stream.close()
-
-            # Clean up
-            os.unlink(temp_filename)
+                    # Clean up stream
+                    stream.stop_stream()
+                    stream.close()
 
         except Exception as e:
             logger.error(f"Error playing audio: {e}")
