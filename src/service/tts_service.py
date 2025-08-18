@@ -1,6 +1,4 @@
 import pyttsx3
-import sounddevice as sd
-import numpy as np
 import tempfile
 import os
 from typing import Optional

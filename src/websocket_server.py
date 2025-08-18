@@ -5,7 +5,7 @@ import logging
 import numpy as np
 import base64
 from typing import Dict, Set
-from src.service.streaming_speech_service import StreamingSpeechService
+from src.service.transcription_service import StreamingSpeechService
 from src.service.translation_service import TranslationService
 from src.service.tts_service import TTSService
 from src.utils.config import Config

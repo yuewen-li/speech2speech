@@ -205,13 +205,8 @@ async def main():
                 if user_input == "q":
                     break
                 elif user_input == "":
-                    # Start streaming
                     print("Starting streaming... Press Enter again to stop")
                     await client.start_streaming()
-
-                    # Wait for user to stop
-                    input("Press Enter to stop streaming...")
-                    await client.stop_streaming()
                 else:
                     print(
                         "Invalid command. Press Enter to start streaming or 'q' to quit"
