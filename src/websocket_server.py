@@ -52,8 +52,7 @@ class StreamingTranslationServer:
 
             # Set up callbacks
             streaming_service.set_callbacks(
-                on_transcription=self._on_transcription(websocket),
-                on_translation_ready=self._on_translation_ready(websocket),
+                on_transcription=self._on_transcription(websocket)
             )
 
             self.connection_services[websocket] = streaming_service
@@ -158,48 +157,33 @@ class StreamingTranslationServer:
 
         async def callback(transcribed_text: str):
             try:
-                await websocket.send(
-                    json.dumps(
-                        {
-                            "type": "transcription",
-                            "text": transcribed_text,
-                            "timestamp": asyncio.get_event_loop().time(),
-                        }
+                streaming_service = self.connection_services.get(websocket)
+                if streaming_service:
+                    source_lang = streaming_service.language
+                    # Translate text
+                    translated_text = await self.translation_service.translate(
+                        transcribed_text, source_lang
                     )
-                )
+                    # Generate TTS audio
+                    audio_base64 = self.tts_service.save_audio_in_memory(
+                        translated_text
+                    )
+                    if audio_base64:
+                        # Send translation with audio
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "translation_ready",
+                                    "transcribed_text": transcribed_text,
+                                    "translated_text": translated_text,
+                                    "source_language": source_lang,
+                                    "audio_data": audio_base64,
+                                    "timestamp": asyncio.get_event_loop().time(),
+                                }
+                            )
+                        )
             except Exception as e:
                 logger.error(f"Error sending transcription: {e}")
-
-        return callback
-
-    def _on_translation_ready(self, websocket):
-        """Callback for when translation is ready"""
-
-        async def callback(
-            original_text: str, translated_text: str, source_lang: str, target_lang: str
-        ):
-            try:
-                # Generate TTS audio
-                audio_base64 = self.tts_service.save_audio_in_memory(translated_text)
-
-                if audio_base64:
-                    # Send translation with audio
-                    await websocket.send(
-                        json.dumps(
-                            {
-                                "type": "translation_ready",
-                                "original_text": original_text,
-                                "translated_text": translated_text,
-                                "source_language": source_lang,
-                                "target_language": target_lang,
-                                "audio_data": audio_base64,
-                                "timestamp": asyncio.get_event_loop().time(),
-                            }
-                        )
-                    )
-
-            except Exception as e:
-                logger.error(f"Error sending translation: {e}")
 
         return callback
 

@@ -2,10 +2,8 @@ import asyncio
 import numpy as np
 import speech_recognition as sr
 import logging
-from typing import Optional, Callable, AsyncGenerator
+from typing import Optional, Callable
 from collections import deque
-import threading
-import queue
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +29,6 @@ class StreamingSpeechService:
         # Audio buffer for streaming
         self.audio_buffer = deque(maxlen=self.buffer_size)
         self.is_recording = False
-        # self.recognition_thread = None
         self.audio_queue = asyncio.Queue()
 
         # Speech recognition setup
@@ -41,14 +38,10 @@ class StreamingSpeechService:
 
         # Callbacks
         self.on_transcription = None
-        self.on_translation_ready = None
 
-    def set_callbacks(
-        self, on_transcription: Callable = None, on_translation_ready: Callable = None
-    ):
+    def set_callbacks(self, on_transcription: Callable = None):
         """Set callback functions for real-time events"""
         self.on_transcription = on_transcription
-        self.on_translation_ready = on_translation_ready
 
     async def start_streaming(self):
         """Start the streaming recognition service"""
@@ -72,8 +65,10 @@ class StreamingSpeechService:
         """Background worker for continuous recognition"""
         while self.is_recording:
             try:
-                # Get audio chunk from queue
-                audio_chunk = await self.audio_queue.get()
+                # Get audio chunk from queue with a timeout
+                audio_chunk = await asyncio.wait_for(
+                    self.audio_queue.get(), timeout=0.1
+                )
 
                 # Add to buffer
                 self.audio_buffer.extend(audio_chunk.flatten())
@@ -82,10 +77,20 @@ class StreamingSpeechService:
                 if len(self.audio_buffer) >= self.buffer_size:
                     await self._process_audio_buffer()
 
-            except asyncio.Queue.Empty:
+            except asyncio.TimeoutError:
+                # Continue to check if recording has stopped
                 continue
             except Exception as e:
                 logger.error(f"Error in recognition worker: {e}")
+
+        # Process any remaining audio in the queue
+        while not self.audio_queue.empty():
+            audio_chunk = self.audio_queue.get_nowait()
+            self.audio_buffer.extend(audio_chunk.flatten())
+
+        # Process the final buffer if there's anything in it
+        if len(self.audio_buffer) > 0:
+            await self._process_audio_buffer()
 
     async def _process_audio_buffer(self):
         """Process the current audio buffer for recognition"""
@@ -101,21 +106,32 @@ class StreamingSpeechService:
                 if self.on_transcription:
                     await self.on_transcription(transcribed_text)
 
-                # Clear buffer after successful recognition
-                self.audio_buffer.clear()
-
         except Exception as e:
             logger.error(f"Error processing audio buffer: {e}")
+        finally:
+            # Clear buffer after processing to avoid reprocessing the same data
+            self.audio_buffer.clear()
 
     def _transcribe_audio(self, audio_data: np.ndarray) -> Optional[str]:
         """Transcribe audio data"""
         try:
+            # Ensure audio data is in 16-bit format
+            audio_data = audio_data.astype(np.int16)
+
             audio_bytes = audio_data.tobytes()
             audio_data_sr = sr.AudioData(audio_bytes, self.sample_rate, 2)
             text = self.recognizer.recognize_google(
                 audio_data_sr, language=self.language
             )
             return text
+        except sr.UnknownValueError:
+            logger.warning("Speech recognition could not understand audio")
+            return None
+        except sr.RequestError as e:
+            logger.error(
+                f"Could not request results from speech recognition service: {e}"
+            )
+            return None
         except Exception as e:
             logger.error(f"Error transcribing audio: {e}")
             return None
