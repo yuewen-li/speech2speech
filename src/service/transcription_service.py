@@ -18,7 +18,7 @@ class StreamingSpeechService:
         language: str,
         sample_rate: int = 16000,
         chunk_size: int = 1024,
-        buffer_duration: float = 2.0,
+        buffer_duration: float = 3.5,
     ):
         self.sample_rate = sample_rate
         self.chunk_size = chunk_size
@@ -33,8 +33,9 @@ class StreamingSpeechService:
 
         # Speech recognition setup
         self.recognizer = sr.Recognizer()
-        self.recognizer.energy_threshold = 4000
-        self.recognizer.dynamic_energy_threshold = True
+        # minimum audio energy to consider for recording
+        self.recognizer.energy_threshold = 1000
+        self.recognizer.dynamic_energy_threshold = False
 
         # Callbacks
         self.on_transcription = None

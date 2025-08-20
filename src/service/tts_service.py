@@ -4,6 +4,7 @@ import os
 from typing import Optional
 import logging
 import base64
+import pythoncom
 
 
 logging.basicConfig(level=logging.INFO)
@@ -38,6 +39,7 @@ class TTSService:
         Generate TTS audio and return it as a base64-encoded string (WAV format).
         This method is thread-safe by creating a new engine for each call.
         """
+        pythoncom.CoInitialize()
         temp_filename = ""
         try:
             engine = self._initialize_engine(language)
