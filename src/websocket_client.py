@@ -5,6 +5,7 @@ import pyaudio
 import wave
 import base64
 import logging
+import io
 from src.utils.config import Config
 
 logging.basicConfig(level=logging.INFO)
@@ -151,7 +152,6 @@ class StreamingTranslationClient:
     async def _play_audio(self, audio_data: bytes):
         """Play audio data received as a WAV file in memory"""
         try:
-            import io
 
             with io.BytesIO(audio_data) as audio_file:
                 with wave.open(audio_file, "rb") as wf:
@@ -197,21 +197,7 @@ async def main():
     try:
         # Connect to server
         if await client.connect():
-            print("Press Enter to start streaming, or 'q' to quit")
-
-            while True:
-                user_input = input("> ").strip().lower()
-
-                if user_input == "q":
-                    break
-                elif user_input == "":
-                    print("Starting streaming... Press Enter again to stop")
-                    await client.start_streaming()
-                else:
-                    print(
-                        "Invalid command. Press Enter to start streaming or 'q' to quit"
-                    )
-
+            await client.start_streaming()
     except KeyboardInterrupt:
         print("\nInterrupted by user")
     finally:
