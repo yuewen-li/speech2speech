@@ -56,10 +56,6 @@ class StreamingTranslationServer:
             )
 
             self.connection_services[websocket] = streaming_service
-
-            # Start streaming service
-            await streaming_service.start_streaming()
-
             logger.info(
                 f"New WebSocket connection established. Total connections: {len(self.active_connections)}"
             )
