@@ -1,13 +1,17 @@
 <!doctype html>
 <meta charset="utf-8" />
 <body>
+<label for="lang">Language:</label>
+<select id="lang">
+  <option value="en-US" selected>English (US)</option>
+  <option value="zh-CN">中文 (普通话)</option>
+</select>
 <button id="start">Start</button>
 <div id="log" style="font-family:monospace; white-space:pre-wrap; margin-top:8px;"></div>
 <audio id="remote" autoplay></audio>
 <script>
 const WS_URL = 'ws://localhost:8000';
 const TOKEN = 'SECRET_WS_TOKEN';
-const LANGUAGE = 'en-US';
 
 let ws;
 let pc;
@@ -19,6 +23,7 @@ document.getElementById('start').onclick = async () => {
 
   ws = new WebSocket(WS_URL);
   ws.onopen = async () => {
+    const LANGUAGE = document.getElementById('lang').value;
     ws.send(JSON.stringify({ token: TOKEN, language: LANGUAGE }));
     ws.send(JSON.stringify({ type: 'start_streaming' }));
     await startWebRTC();
