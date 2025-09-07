@@ -60,8 +60,8 @@ class TTSService:
             with open(temp_filename, "rb") as f:
                 audio_bytes = f.read()
 
-            audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
-            return audio_base64
+            # audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
+            return audio_bytes
         except Exception as e:
             logger.error(f"Error saving audio to memory: {e}")
             return None

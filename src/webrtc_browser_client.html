@@ -1,0 +1,85 @@
+<!doctype html>
+<meta charset="utf-8" />
+<body>
+<button id="start">Start</button>
+<div id="log" style="font-family:monospace; white-space:pre-wrap; margin-top:8px;"></div>
+<audio id="remote" autoplay></audio>
+<script>
+const WS_URL = 'wss://your-domain.example:8000';
+const TOKEN = 'YOUR_WS_TOKEN';
+const LANGUAGE = 'en-US';
+
+let ws;
+let pc;
+let started = false;
+let transcriptChannel;
+
+document.getElementById('start').onclick = async () => {
+  if (started) return; started = true;
+
+  ws = new WebSocket(WS_URL);
+  ws.onopen = async () => {
+    ws.send(JSON.stringify({ token: TOKEN, language: LANGUAGE }));
+    ws.send(JSON.stringify({ type: 'start_streaming' }));
+    await startWebRTC();
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'webrtc_answer' && msg.sdp) {
+      pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+    }
+  };
+};
+
+async function startWebRTC() {
+  pc = new RTCPeerConnection({
+    iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
+  });
+
+  // Attach remote audio track to <audio>
+  pc.ontrack = (e) => {
+    const remote = document.getElementById('remote');
+    if (remote.srcObject !== e.streams[0]) {
+      remote.srcObject = e.streams[0];
+    }
+  };
+
+  // Handle inbound data channels (server-initiated)
+  pc.ondatachannel = (ev) => {
+    const channel = ev.channel;
+    if (channel.label === 'transcripts') {
+      transcriptChannel = channel;
+      channel.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.type === 'transcript') {
+            appendLog(`${data.transcribed_text} => ${data.translated_text}`);
+          }
+        } catch {}
+      };
+    }
+  };
+
+  pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      ws?.send(JSON.stringify({ type: 'webrtc_ice', candidate: e.candidate }));
+    }
+  };
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+  });
+  for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
+
+  const offer = await pc.createOffer({ offerToReceiveAudio: true });
+  await pc.setLocalDescription(offer);
+  ws?.send(JSON.stringify({ type: 'webrtc_offer', sdp: pc.localDescription }));
+}
+
+function appendLog(text) {
+  const el = document.getElementById('log');
+  el.textContent += (el.textContent ? '\n' : '') + text;
+}
+</script>
+</body>
