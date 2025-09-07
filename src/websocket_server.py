@@ -5,19 +5,20 @@ import logging
 import numpy as np
 import base64
 from typing import Dict, Set
+from fractions import Fraction  # Import Fraction
 from src.service.transcription_service import StreamingSpeechService
 from src.service.translation_service import TranslationService
 from src.service.tts_service import TTSService
 from src.utils.config import Config
 
 # WebRTC imports
-from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
+from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack, RTCIceCandidate
 from aiortc.contrib.media import MediaBlackhole
 import av
 import aiohttp
 from aiohttp import web
 import io
-from aiortc.sdp import candidate_from_sdp
+
 
 logger = logging.getLogger(__name__)
 
@@ -248,27 +249,16 @@ class StreamingTranslationServer:
         try:
             candidate = data.get("candidate")
             pc = self.ws_to_pc.get(websocket)
-            if not pc:
+            if not pc or candidate is None:
                 return
 
-            # Browser may send null to signal end-of-candidates
-            if candidate is None:
-                await pc.addIceCandidate(None)
-                return
-
-            # Normalize dict -> RTCIceCandidate using SDP parser
-            if isinstance(candidate, dict):
-                cstr = candidate.get("candidate")
-                if not cstr:
-                    return
-                cand = candidate_from_sdp(cstr)
-                # attach mid/index for matching
-                setattr(cand, "sdpMid", candidate.get("sdpMid"))
-                setattr(cand, "sdpMLineIndex", candidate.get("sdpMLineIndex"))
-                await pc.addIceCandidate(cand)
-            else:
-                # Assume it's already an object with attributes
-                await pc.addIceCandidate(candidate)
+            # Construct RTCIceCandidate from the dictionary sent by the browser
+            cand = RTCIceCandidate(
+                sdpMid=candidate.get("sdpMid"),
+                sdpMLineIndex=candidate.get("sdpMLineIndex"),
+                candidate=candidate.get("candidate"),
+            )
+            await pc.addIceCandidate(cand)
         except Exception as e:
             logger.error(f"Error handling ICE candidate: {e}")
 
@@ -422,26 +412,27 @@ class TTSQueueAudioTrack(MediaStreamTrack):
         super().__init__()
         self._queue: asyncio.Queue[av.AudioFrame] = asyncio.Queue()
         self._closed = False
+        self._pts_offset = 0  # Running PTS offset for continuous stream
 
     async def enqueue_wav_bytes(self, wav_bytes: bytes):
-        """Decode WAV bytes into av.AudioFrame chunks and enqueue."""
+        """Decode WAV bytes, offset timestamps, and enqueue for sending."""
         try:
+            max_pts_in_file = 0
             with av.open(io.BytesIO(wav_bytes), format="wav") as container:
-                # WebRTC Opus expects 48000 Hz mono/stereo, s16
-                resampler = av.audio.resampler.AudioResampler(format="s16", layout="mono", rate=48000)
+                resampler = av.audio.resampler.AudioResampler(
+                    format="s16", layout="mono", rate=48000
+                )
                 for frame in container.decode(audio=0):
-                    try:
-                        resampled = resampler.resample(frame)
-                    except Exception:
-                        resampled = frame
-                    frames = resampled if isinstance(resampled, list) else [resampled]
-                    for rf in frames:
-                        # Ensure proper layout naming
-                        if getattr(rf, "layout", None) and rf.layout.name not in ["mono", "stereo"]:
-                            # Force to mono if exotic layout leaks through
-                            rf = av.audio.resampler.AudioResampler(format="s16", layout="mono", rate=48000).resample(rf)
-                            rf = rf if isinstance(rf, av.AudioFrame) else rf[0]
-                        await self._queue.put(rf)
+                    resampled_frames = resampler.resample(frame)
+                    for r_frame in resampled_frames:
+                        # Offset the PTS of each frame to make it continuous
+                        r_frame.pts += self._pts_offset
+                        max_pts_in_file = r_frame.pts  # Track the latest PTS
+                        await self._queue.put(r_frame)
+            
+            # Update the offset for the next audio clip
+            self._pts_offset = max_pts_in_file + 1
+
         except Exception as e:
             logger.error(f"Failed to enqueue WAV bytes: {e}")
 
@@ -450,9 +441,6 @@ class TTSQueueAudioTrack(MediaStreamTrack):
             raise asyncio.CancelledError()
         frame = await self._queue.get()
         return frame
-
-    async def close(self):
-        self._closed = True
 
 
 async def main():
