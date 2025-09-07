@@ -17,6 +17,7 @@ import av
 import aiohttp
 from aiohttp import web
 import io
+from aiortc.sdp import candidate_from_sdp
 
 logger = logging.getLogger(__name__)
 
@@ -187,18 +188,29 @@ class StreamingTranslationServer:
 
                 # Consume audio frames and feed into ASR pipeline as PCM16
                 async def recv_audio():
+                    # Resample all incoming audio to 16k mono s16 for ASR
+                    resampler = av.audio.resampler.AudioResampler(
+                        format="s16", layout="mono", rate=Config.SAMPLE_RATE
+                    )
                     while True:
                         frame = await track.recv()
-                        # Convert AV frame (float32/planar) to int16 mono numpy
-                        pcm = frame.to_ndarray()
-                        if pcm.ndim > 1:
-                            pcm = pcm.mean(axis=0)
-                        # Normalize to int16
-                        if pcm.dtype != np.int16:
-                            pcm = np.clip(pcm * 32767.0, -32768, 32767).astype(np.int16)
+                        # Resample to 16k mono s16
+                        try:
+                            resampled = resampler.resample(frame)
+                        except Exception:
+                            # Fallback: convert without resample
+                            resampled = frame
+
+                        # resampled may be a list of frames; normalize to list
+                        frames = resampled if isinstance(resampled, list) else [resampled]
                         streaming_service = self.connection_services.get(websocket)
-                        if streaming_service and streaming_service.is_recording:
-                            await streaming_service.add_audio_chunk(pcm)
+                        for rf in frames:
+                            # Convert to numpy int16
+                            pcm = rf.to_ndarray()
+                            if pcm.dtype != np.int16:
+                                pcm = pcm.astype(np.int16, copy=False)
+                            if streaming_service and streaming_service.is_recording:
+                                await streaming_service.add_audio_chunk(pcm)
 
                 asyncio.create_task(recv_audio())
 
@@ -236,7 +248,26 @@ class StreamingTranslationServer:
         try:
             candidate = data.get("candidate")
             pc = self.ws_to_pc.get(websocket)
-            if pc and candidate:
+            if not pc:
+                return
+
+            # Browser may send null to signal end-of-candidates
+            if candidate is None:
+                await pc.addIceCandidate(None)
+                return
+
+            # Normalize dict -> RTCIceCandidate using SDP parser
+            if isinstance(candidate, dict):
+                cstr = candidate.get("candidate")
+                if not cstr:
+                    return
+                cand = candidate_from_sdp(cstr)
+                # attach mid/index for matching
+                setattr(cand, "sdpMid", candidate.get("sdpMid"))
+                setattr(cand, "sdpMLineIndex", candidate.get("sdpMLineIndex"))
+                await pc.addIceCandidate(cand)
+            else:
+                # Assume it's already an object with attributes
                 await pc.addIceCandidate(candidate)
         except Exception as e:
             logger.error(f"Error handling ICE candidate: {e}")
@@ -396,8 +427,21 @@ class TTSQueueAudioTrack(MediaStreamTrack):
         """Decode WAV bytes into av.AudioFrame chunks and enqueue."""
         try:
             with av.open(io.BytesIO(wav_bytes), format="wav") as container:
+                # WebRTC Opus expects 48000 Hz mono/stereo, s16
+                resampler = av.audio.resampler.AudioResampler(format="s16", layout="mono", rate=48000)
                 for frame in container.decode(audio=0):
-                    await self._queue.put(frame)
+                    try:
+                        resampled = resampler.resample(frame)
+                    except Exception:
+                        resampled = frame
+                    frames = resampled if isinstance(resampled, list) else [resampled]
+                    for rf in frames:
+                        # Ensure proper layout naming
+                        if getattr(rf, "layout", None) and rf.layout.name not in ["mono", "stereo"]:
+                            # Force to mono if exotic layout leaks through
+                            rf = av.audio.resampler.AudioResampler(format="s16", layout="mono", rate=48000).resample(rf)
+                            rf = rf if isinstance(rf, av.AudioFrame) else rf[0]
+                        await self._queue.put(rf)
         except Exception as e:
             logger.error(f"Failed to enqueue WAV bytes: {e}")
 

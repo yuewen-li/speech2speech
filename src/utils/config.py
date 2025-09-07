@@ -20,7 +20,7 @@ class Config:
     PORT = int(os.getenv("PORT", "8000"))
 
     # Simple bearer token for WebSocket auth
-    WS_TOKEN = os.getenv("WS_TOKEN", "")
+    WS_TOKEN = os.getenv("WS_TOKEN", "SECRET_WS_TOKEN")
 
     # Optional ICE servers for WebRTC
     # Comma-separated URLs, e.g.:
