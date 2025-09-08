@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 class StreamingSpeechService:
     """
-    Real-time streaming speech recognition service
+    Real-time streaming speech recognition service with VAD-based end-of-utterance detection.
     """
 
     def __init__(
@@ -19,6 +19,10 @@ class StreamingSpeechService:
         sample_rate: int = 16000,
         chunk_size: int = 1024,
         buffer_duration: float = 3.5,
+        vad_silence_ms: int = 700,
+        vad_min_utterance_ms: int = 300,
+        vad_max_utterance_ms: int = 15000,
+        vad_rms_threshold: float = 300.0,
     ):
         self.sample_rate = sample_rate
         self.chunk_size = chunk_size
@@ -26,8 +30,8 @@ class StreamingSpeechService:
         self.buffer_size = int(sample_rate * buffer_duration)
         self.language = language
 
-        # Audio buffer for streaming
-        self.audio_buffer = deque(maxlen=self.buffer_size)
+        # Audio buffer for streaming (utterance-level; unlimited, we flush via VAD)
+        self.audio_buffer = deque()
         self.is_recording = False
         self.audio_queue = asyncio.Queue()
 
@@ -36,6 +40,17 @@ class StreamingSpeechService:
         # minimum audio energy to consider for recording
         self.recognizer.energy_threshold = 1000
         self.recognizer.dynamic_energy_threshold = False
+
+        # VAD parameters
+        self.vad_silence_ms = vad_silence_ms
+        self.vad_min_utterance_ms = vad_min_utterance_ms
+        self.vad_max_utterance_ms = vad_max_utterance_ms
+        # Simple RMS threshold for voiced/unvoiced decision (int16 amplitude)
+        self.vad_rms_threshold = vad_rms_threshold
+
+        # Runtime VAD state
+        self.current_utterance_samples = 0
+        self.current_silence_ms = 0
 
         # Callbacks
         self.on_transcription = None
@@ -71,11 +86,27 @@ class StreamingSpeechService:
                     self.audio_queue.get(), timeout=0.1
                 )
 
-                # Add to buffer
-                self.audio_buffer.extend(audio_chunk.flatten())
+                # Add to utterance buffer
+                flat = audio_chunk.flatten()
+                self.audio_buffer.extend(flat)
+                self.current_utterance_samples += len(flat)
 
-                # Process buffer when it's full enough
-                if len(self.audio_buffer) >= self.buffer_size:
+                # Compute simple RMS to detect speech vs silence
+                rms = float(np.sqrt(np.mean(flat.astype(np.float32) ** 2)))
+                chunk_ms = int(1000 * len(flat) / self.sample_rate)
+                if rms >= self.vad_rms_threshold:
+                    # voiced
+                    self.current_silence_ms = 0
+                else:
+                    # silence
+                    self.current_silence_ms += chunk_ms
+
+                # Trigger transcription if sufficient silence after speech
+                utterance_ms = int(1000 * self.current_utterance_samples / self.sample_rate)
+                if (
+                    self.current_silence_ms >= self.vad_silence_ms
+                    and utterance_ms >= self.vad_min_utterance_ms
+                ) or utterance_ms >= self.vad_max_utterance_ms:
                     await self._process_audio_buffer()
 
             except asyncio.TimeoutError:
@@ -98,11 +129,12 @@ class StreamingSpeechService:
         try:
             # Convert buffer to numpy array
             audio_data = np.array(list(self.audio_buffer), dtype=np.int16)
+            if audio_data.size == 0:
+                return
 
             # Try to transcribe
             transcribed_text = self._transcribe_audio(audio_data)
             if transcribed_text:
-
                 # Call callbacks
                 if self.on_transcription:
                     await self.on_transcription(transcribed_text)
@@ -110,8 +142,10 @@ class StreamingSpeechService:
         except Exception as e:
             logger.error(f"Error processing audio buffer: {e}")
         finally:
-            # Clear buffer after processing to avoid reprocessing the same data
+            # Clear buffer and reset VAD state after processing
             self.audio_buffer.clear()
+            self.current_utterance_samples = 0
+            self.current_silence_ms = 0
 
     def _transcribe_audio(self, audio_data: np.ndarray) -> Optional[str]:
         """Transcribe audio data"""
