@@ -18,7 +18,6 @@ class StreamingSpeechService:
         language: str,
         sample_rate: int = 16000,
         chunk_size: int = 1024,
-        buffer_duration: float = 3.5,
         vad_silence_ms: int = 700,
         vad_min_utterance_ms: int = 300,
         vad_max_utterance_ms: int = 15000,
@@ -26,8 +25,6 @@ class StreamingSpeechService:
     ):
         self.sample_rate = sample_rate
         self.chunk_size = chunk_size
-        self.buffer_duration = buffer_duration
-        self.buffer_size = int(sample_rate * buffer_duration)
         self.language = language
 
         # Audio buffer for streaming (utterance-level; unlimited, we flush via VAD)
