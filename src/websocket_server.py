@@ -14,6 +14,7 @@ from src.utils.config import Config
 # WebRTC imports
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack, RTCIceCandidate
 from aiortc.contrib.media import MediaBlackhole
+from aiortc.sdp import candidate_from_sdp
 import av
 import aiohttp
 from aiohttp import web
@@ -247,18 +248,20 @@ class StreamingTranslationServer:
     async def _handle_webrtc_ice(self, websocket, data):
         """Handle remote ICE candidate from client"""
         try:
-            candidate = data.get("candidate")
-            pc = self.ws_to_pc.get(websocket)
-            if not pc or candidate is None:
+            candidate_dict = data.get("candidate")
+            if candidate_dict is None:
                 return
 
-            # Construct RTCIceCandidate from the dictionary sent by the browser
-            cand = RTCIceCandidate(
-                sdpMid=candidate.get("sdpMid"),
-                sdpMLineIndex=candidate.get("sdpMLineIndex"),
-                candidate=candidate.get("candidate"),
-            )
-            await pc.addIceCandidate(cand)
+            # The aiortc library expects a specific object, not a raw dict.
+            # We use the candidate_from_sdp helper for parsing.
+            cand = candidate_from_sdp(candidate_dict["candidate"])
+            cand.sdpMid = candidate_dict["sdpMid"]
+            cand.sdpMLineIndex = candidate_dict["sdpMLineIndex"]
+            
+            pc = self.ws_to_pc.get(websocket)
+            if pc:
+                await pc.addIceCandidate(cand)
+
         except Exception as e:
             logger.error(f"Error handling ICE candidate: {e}")
 

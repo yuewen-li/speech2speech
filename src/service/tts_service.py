@@ -36,7 +36,7 @@ class TTSService:
 
     def save_audio_in_memory(self, text: str, language: str = "en") -> Optional[str]:
         """
-        Generate TTS audio and return it as a base64-encoded string (WAV format).
+        Generate TTS audio and return it as a audio bytes (WAV format).
         This method is thread-safe by creating a new engine for each call.
         """
         pythoncom.CoInitialize()
