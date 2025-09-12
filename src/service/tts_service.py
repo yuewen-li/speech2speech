@@ -34,7 +34,7 @@ class TTSService:
         engine.setProperty("volume", 0.9)
         return engine
 
-    def save_audio_in_memory(self, text: str, language: str = "en") -> Optional[str]:
+    def save_audio_in_memory(self, text: str, language: str = "en") -> Optional[bytes]:
         """
         Generate TTS audio and return it as a audio bytes (WAV format).
         This method is thread-safe by creating a new engine for each call.

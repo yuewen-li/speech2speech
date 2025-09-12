@@ -5,18 +5,19 @@ import logging
 import numpy as np
 import base64
 from typing import Dict, Set
-from fractions import Fraction  # Import Fraction
 from src.service.transcription_service import StreamingSpeechService
 from src.service.translation_service import TranslationService
 from src.service.tts_service import TTSService
 from src.utils.config import Config
 
 # WebRTC imports
-from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack, RTCIceCandidate
-from aiortc.contrib.media import MediaBlackhole
+from aiortc import (
+    RTCPeerConnection,
+    RTCSessionDescription,
+    MediaStreamTrack,
+)
 from aiortc.sdp import candidate_from_sdp
 import av
-import aiohttp
 from aiohttp import web
 import io
 
@@ -44,7 +45,9 @@ class StreamingTranslationServer:
 
         # For WebRTC peer connections per websocket
         self.ws_to_pc: Dict[websockets.WebSocketServerProtocol, RTCPeerConnection] = {}
-        self.ws_to_tts_track: Dict[websockets.WebSocketServerProtocol, MediaStreamTrack] = {}
+        self.ws_to_tts_track: Dict[
+            websockets.WebSocketServerProtocol, MediaStreamTrack
+        ] = {}
         self.ws_to_data_channel: Dict[websockets.WebSocketServerProtocol, object] = {}
 
     async def handle_connection(self, websocket):
@@ -181,6 +184,13 @@ class StreamingTranslationServer:
                 return
             pc = RTCPeerConnection()
             self.ws_to_pc[websocket] = pc
+            
+            # Handle client-initiated data channel
+            @pc.on("datachannel")
+            async def on_datachannel(channel):
+                if channel.label == "transcripts":
+                    self.ws_to_data_channel[websocket] = channel
+                    logger.info(f"Data channel '{channel.label}' received from client")
 
             # Inbound audio handler
             @pc.on("track")
@@ -204,7 +214,9 @@ class StreamingTranslationServer:
                             resampled = frame
 
                         # resampled may be a list of frames; normalize to list
-                        frames = resampled if isinstance(resampled, list) else [resampled]
+                        frames = (
+                            resampled if isinstance(resampled, list) else [resampled]
+                        )
                         streaming_service = self.connection_services.get(websocket)
                         for rf in frames:
                             # Convert to numpy int16
@@ -216,30 +228,27 @@ class StreamingTranslationServer:
 
                 asyncio.create_task(recv_audio())
 
-            # Optional blackhole for any incoming media (not used otherwise)
-            media_sink = MediaBlackhole()
-
             # Create a server-generated outbound audio track for TTS
             tts_track = TTSQueueAudioTrack()
             self.ws_to_tts_track[websocket] = tts_track
             pc.addTrack(tts_track)
 
-            # Create a server-initiated data channel for transcripts
-            data_channel = pc.createDataChannel("transcripts")
-            self.ws_to_data_channel[websocket] = data_channel
-
-            @pc.on("datachannel")
-            def on_datachannel(channel):
-                self.ws_to_data_channel[websocket] = channel
-
-            await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp["sdp"], type=sdp["type"]))
-
+            await pc.setRemoteDescription(
+                RTCSessionDescription(sdp=sdp["sdp"], type=sdp["type"])
+            )
+            
             # Create an answer
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
-
+            
             # Reply with SDP answer
-            resp = {"type": "webrtc_answer", "sdp": {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}}
+            resp = {
+                "type": "webrtc_answer",
+                "sdp": {
+                    "sdp": pc.localDescription.sdp,
+                    "type": pc.localDescription.type,
+                },
+            }
             await websocket.send(json.dumps(resp))
 
         except Exception as e:
@@ -257,7 +266,7 @@ class StreamingTranslationServer:
             cand = candidate_from_sdp(candidate_dict["candidate"])
             cand.sdpMid = candidate_dict["sdpMid"]
             cand.sdpMLineIndex = candidate_dict["sdpMLineIndex"]
-            
+
             pc = self.ws_to_pc.get(websocket)
             if pc:
                 await pc.addIceCandidate(cand)
@@ -319,8 +328,13 @@ class StreamingTranslationServer:
                     )
                     try:
                         channel.send(payload)
+                        logger.debug("Sent transcript over data channel")
                     except Exception as e:
-                        logger.warning(f"Failed sending transcript on data channel: {e}")
+                        logger.warning(
+                            f"Failed sending transcript on data channel: {e}"
+                        )
+                else:
+                    logger.warning("No open data channel; unable to send transcript")
 
             except Exception as e:
                 logger.error(f"Error in transcription callback: {e}")
@@ -396,7 +410,9 @@ class StreamingTranslationServer:
             await runner.setup()
             http_site = web.TCPSite(runner, host, port + 1)
             await http_site.start()
-            logger.info(f"HTTP health endpoint started on http://{host}:{port+1}/healthz")
+            logger.info(
+                f"HTTP health endpoint started on http://{host}:{port+1}/healthz"
+            )
 
             # Keep servers running
             await server.wait_closed()
@@ -432,7 +448,7 @@ class TTSQueueAudioTrack(MediaStreamTrack):
                         r_frame.pts += self._pts_offset
                         max_pts_in_file = r_frame.pts  # Track the latest PTS
                         await self._queue.put(r_frame)
-            
+
             # Update the offset for the next audio clip
             self._pts_offset = max_pts_in_file + 1
 

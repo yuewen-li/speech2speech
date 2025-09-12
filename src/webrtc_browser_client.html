@@ -7,9 +7,15 @@
   <option value="zh-CN">中文 (普通话)</option>
 </select>
 <button id="start">Start</button>
-<div id="log" style="font-family:monospace; white-space:pre-wrap; margin-top:8px;"></div>
+<div id="panel" style="display:flex; gap:12px; margin-top:12px;">
+  <div style="flex:1;">
+    <div style="font-weight:bold; margin-bottom:6px;">Transcripts</div>
+    <div id="transcripts" style="border:1px solid #ddd; border-radius:6px; padding:8px; height:220px; overflow:auto; font-family:system-ui, sans-serif;"></div>
+  </div>
+</div>
 <audio id="remote" autoplay></audio>
 <script>
+console.log('Script loaded');
 const WS_URL = 'ws://localhost:8000';
 const TOKEN = 'SECRET_WS_TOKEN';
 
@@ -50,21 +56,7 @@ async function startWebRTC() {
     }
   };
 
-  // Handle inbound data channels (server-initiated)
-  pc.ondatachannel = (ev) => {
-    const channel = ev.channel;
-    if (channel.label === 'transcripts') {
-      transcriptChannel = channel;
-      channel.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          if (data.type === 'transcript') {
-            appendLog(`${data.transcribed_text} => ${data.translated_text}`);
-          }
-        } catch {}
-      };
-    }
-  };
+  // Note: Using client-initiated data channel instead of server-initiated
 
   pc.onicecandidate = (e) => {
     if (e.candidate) {
@@ -77,14 +69,55 @@ async function startWebRTC() {
   });
   for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
 
+  // Create data channel before creating offer
+  const dataChannel = pc.createDataChannel('transcripts');
+  console.log('Created data channel:', dataChannel.label, 'state:', dataChannel.readyState);
+  dataChannel.onopen = () => {
+    console.log('Client data channel opened, state:', dataChannel.readyState);
+  };
+  dataChannel.onclose = () => {
+    console.log('Client data channel closed');
+  };
+  dataChannel.onerror = (error) => {
+    console.error('Client data channel error:', error);
+  };
+  dataChannel.onmessage = (e) => {
+    console.log('Data channel message received:', e.data);
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'transcript') {
+        addTranscript(data);
+      }
+    } catch (err) {
+      console.error('Failed to parse data channel message:', err);
+    }
+  };
+
   const offer = await pc.createOffer({ offerToReceiveAudio: true });
   await pc.setLocalDescription(offer);
   ws?.send(JSON.stringify({ type: 'webrtc_offer', sdp: pc.localDescription }));
 }
 
-function appendLog(text) {
-  const el = document.getElementById('log');
-  el.textContent += (el.textContent ? '\n' : '') + text;
+function addTranscript(data) {
+  console.log('Adding transcript to UI:', data);
+  const transcribed_text = data.transcribed_text;
+  const translated_text = data.translated_text;
+  const source_language = data.source_language;
+  const target_language = data.target_language;
+  const wrap = document.getElementById('transcripts');
+  const row = document.createElement('div');
+  row.style.marginBottom = '8px';
+  const src = document.createElement('div');
+  src.style.color = '#333';
+  src.textContent = `${source_language}: ${transcribed_text}`;
+  const tgt = document.createElement('div');
+  tgt.style.color = '#0a7';
+  tgt.textContent = `${target_language}: ${translated_text}`;
+  row.appendChild(src);
+  row.appendChild(tgt);
+  wrap.appendChild(row);
+  wrap.scrollTop = wrap.scrollHeight;
 }
+
 </script>
 </body>
