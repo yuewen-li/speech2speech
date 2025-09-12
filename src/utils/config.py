@@ -19,6 +19,16 @@ class Config:
     HOST = os.getenv("HOST", "0.0.0.0")
     PORT = int(os.getenv("PORT", "8000"))
 
+    # Simple bearer token for WebSocket auth
+    WS_TOKEN = os.getenv("WS_TOKEN", "SECRET_WS_TOKEN")
+
+    # Optional ICE servers for WebRTC
+    # Comma-separated URLs, e.g.:
+    # "stun:stun.l.google.com:19302,stun:global.stun.twilio.com:3478"
+    ICE_SERVERS = [
+        s.strip() for s in os.getenv("ICE_SERVERS", "stun:stun.l.google.com:19302").split(",") if s.strip()
+    ]
+
     ZH_TO_EN_PROMPT = """
     You are a professional Chinese to English translator. 
     Translate the following Chinese text to natural, fluent English. 
