@@ -49,6 +49,9 @@ class StreamingTranslationServer:
             websockets.WebSocketServerProtocol, MediaStreamTrack
         ] = {}
         self.ws_to_data_channel: Dict[websockets.WebSocketServerProtocol, object] = {}
+        
+        # Response mode preferences per connection
+        self.connection_response_modes: Dict[websockets.WebSocketServerProtocol, str] = {}
 
     async def handle_connection(self, websocket):
         """Handle new WebSocket connection"""
@@ -63,8 +66,18 @@ class StreamingTranslationServer:
                 await websocket.close(code=4401, reason="Unauthorized")
                 return
             language = data.get("language", "en-US")
+            response_mode = data.get("response_mode", "both")  # "transcript_only" or "both"
+            
+            # Validate response_mode
+            if response_mode not in ["transcript_only", "both"]:
+                response_mode = "both"
+                logger.warning(f"Invalid response_mode, defaulting to 'both': {data.get('response_mode')}")
+            
+            # Store response mode preference
+            self.connection_response_modes[websocket] = response_mode
+            
             logger.info(
-                f"New connection from {websocket.remote_address} for language: {language}"
+                f"New connection from {websocket.remote_address} for language: {language}, response_mode: {response_mode}"
             )
 
             # Create streaming service for this connection
@@ -295,24 +308,29 @@ class StreamingTranslationServer:
                     logger.warning("Translation resulted in empty text.")
                     return
 
-                # Generate TTS audio (raw WAV bytes) in a separate thread
-                loop = asyncio.get_running_loop()
-                audio_bytes = await loop.run_in_executor(
-                    None,
-                    self.tts_service.save_audio_in_memory,
-                    translated_text,
-                    target_lang,
-                )
+                # Generate TTS audio only if response_mode is "both"
+                response_mode = self.connection_response_modes.get(websocket, "both")
+                if response_mode == "both":
+                    # Generate TTS audio (raw WAV bytes) in a separate thread
+                    loop = asyncio.get_running_loop()
+                    audio_bytes = await loop.run_in_executor(
+                        None,
+                        self.tts_service.save_audio_in_memory,
+                        translated_text,
+                        target_lang,
+                    )
 
-                if audio_bytes:
-                    # Enqueue to WebRTC TTS track if available; otherwise log warning
-                    tts_track = self.ws_to_tts_track.get(websocket)
-                    if tts_track and hasattr(tts_track, "enqueue_wav_bytes"):
-                        await tts_track.enqueue_wav_bytes(audio_bytes)
+                    if audio_bytes:
+                        # Enqueue to WebRTC TTS track if available; otherwise log warning
+                        tts_track = self.ws_to_tts_track.get(websocket)
+                        if tts_track and hasattr(tts_track, "enqueue_wav_bytes"):
+                            await tts_track.enqueue_wav_bytes(audio_bytes)
+                        else:
+                            logger.warning("No WebRTC TTS track; unable to deliver audio")
                     else:
-                        logger.warning("No WebRTC TTS track; unable to deliver audio")
+                        logger.error("TTS service failed to generate audio.")
                 else:
-                    logger.error("TTS service failed to generate audio.")
+                    logger.debug(f"Response mode is '{response_mode}', skipping TTS audio generation")
 
                 # Send transcript over data channel if available
                 channel = self.ws_to_data_channel.get(websocket)
@@ -352,6 +370,9 @@ class StreamingTranslationServer:
 
             # Remove from active connections
             self.active_connections.discard(websocket)
+            
+            # Remove response mode preference
+            self.connection_response_modes.pop(websocket, None)
 
             # Close any peer connection
             pc = self.ws_to_pc.get(websocket)

@@ -13,6 +13,7 @@ The service is built with a Python backend using WebRTC for real-time audio stre
 - **Text-to-Speech (TTS) Output:** Plays the translated audio back to the user via WebRTC audio tracks.
 - **Real-Time Transcripts:** Displays both original and translated text in real-time via WebRTC data channels.
 - **Web-Based Client:** A modern web-based client that runs in the browser with full WebRTC support.
+- **Flexible Response Modes:** Choose between receiving only transcripts or both transcripts and audio output.
 
 ## How It Works
 
@@ -108,11 +109,14 @@ open src/webrtc_browser_client.html
 ### 3. Using the Client
 
 1. **Select Language:** Choose your source language (`en-US` for English or `zh-CN` for Chinese) from the dropdown.
-2. **Start Translation:** Click the "Start" button to begin the WebRTC connection and start streaming.
-3. **Speak:** Speak into your microphone. You'll see:
+2. **Choose Response Mode:** Select your preferred response mode:
+   - **Both Transcript & Audio:** You'll receive both text transcripts and audio playback (default)
+   - **Transcript Only:** You'll only receive text transcripts without audio playback
+3. **Start Translation:** Click the "Start" button to begin the WebRTC connection and start streaming.
+4. **Speak:** Speak into your microphone. You'll see:
    - Real-time transcripts of your speech and the translation in the UI
-   - Translated audio playing through your speakers
-4. **Stop:** Close the browser tab or refresh the page to stop the session.
+   - Translated audio playing through your speakers (if "Both Transcript & Audio" mode is selected)
+5. **Stop:** Close the browser tab or refresh the page to stop the session.
 
 ### Architecture Notes
 
