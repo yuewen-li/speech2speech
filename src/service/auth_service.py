@@ -1,10 +1,14 @@
 import jwt
 import bcrypt
-import sqlite3
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from src.utils.config import Config
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from src.model.base import Base
+from src.model.users import User
+from src.model.sessions import Session
 
 logger = logging.getLogger(__name__)
 
@@ -12,59 +16,13 @@ logger = logging.getLogger(__name__)
 class AuthService:
     """JWT-based authentication service with SQLite user storage"""
 
-    def __init__(self, db_path: str = "users.db"):
+    def __init__(self, db_url="sqlite:///users.db"):
         self.secret_key = Config.JWT_SECRET_KEY
-        self.db_path = db_path
-        self.algorithm = "HS256"
-        self.token_expiry_hours = 1
-
-        # Initialize database
-        self._init_database()
-
-    def _init_database(self):
-        """Initialize SQLite database with users table"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            # Create users table
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    email TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    plan TEXT DEFAULT 'trial',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_login TIMESTAMP,
-                    is_active BOOLEAN DEFAULT 1,
-                    plan_activation_date TIMESTAMP
-                )
-            """
-            )
-
-            # Create sessions table for token blacklisting
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS sessions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    token_jti TEXT UNIQUE NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    expires_at TIMESTAMP NOT NULL,
-                    is_revoked BOOLEAN DEFAULT 0,
-                    FOREIGN KEY (user_id) REFERENCES users (id)
-                )
-            """
-            )
-
-            conn.commit()
-            conn.close()
-            logger.info("Database initialized successfully")
-
-        except Exception as e:
-            logger.error(f"Error initializing database: {e}")
-            raise
+        self.algorithm = Config.JWT_ALGORITHM
+        self.token_expiry_hours = Config.JWT_EXPIRY_HOURS
+        self.engine = create_engine(db_url, connect_args={"check_same_thread": False})
+        Base.metadata.create_all(self.engine)
+        self.Session = sessionmaker(bind=self.engine)
 
     def hash_password(self, password: str) -> str:
         """Hash password using bcrypt"""
@@ -75,42 +33,27 @@ class AuthService:
         """Verify password against hash"""
         return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
 
-    def create_user(
-        self, email: str, password: str, plan: str = "trial"
-    ) -> Optional[Dict[str, Any]]:
-        """Create a new user"""
+    def create_user(self, email, password, plan="trial"):
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            # Check if user already exists
-            cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
-            if cursor.fetchone():
-                conn.close()
-                return None
-
-            # Create user
-            password_hash = self.hash_password(password)
-            cursor.execute(
-                """
-                INSERT INTO users (email, password_hash, plan)
-                VALUES (?, ?, ?)
-            """,
-                (email, password_hash, plan),
-            )
-
-            user_id = cursor.lastrowid
-            conn.commit()
-            conn.close()
-
-            logger.info(f"User created: {email}")
-            return {
-                "id": user_id,
-                "email": email,
-                "plan": plan,
-                "created_at": datetime.now().isoformat(),
-            }
-
+            with self.Session() as session:
+                if session.query(User).filter_by(email=email).first():
+                    return None
+                password_hash = self.hash_password(password)
+                user = User(
+                    email=email,
+                    password_hash=password_hash,
+                    plan=plan,
+                    created_at=datetime.utcnow(),
+                )
+                session.add(user)
+                session.commit()
+                user_data = {
+                    "id": user.id,
+                    "email": user.email,
+                    "plan": user.plan,
+                    "created_at": user.created_at,
+                }
+                return user_data
         except Exception as e:
             logger.error(f"Error creating user: {e}")
             return None
@@ -118,58 +61,24 @@ class AuthService:
     def authenticate_user(self, email: str, password: str) -> Optional[Dict[str, Any]]:
         """Authenticate user and return user data"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute(
-                """
-                SELECT id, email, password_hash, plan, is_active, created_at, plan_activation_date
-                FROM users WHERE email = ?
-            """,
-                (email,),
-            )
-
-            user = cursor.fetchone()
-            if not user:
-                conn.close()
-                return None
-
-            (
-                user_id,
-                email,
-                password_hash,
-                plan,
-                is_active,
-                created_at,
-                plan_activation_date,
-            ) = user
-
-            if not is_active:
-                conn.close()
-                return None
-
-            if not self.verify_password(password, password_hash):
-                conn.close()
-                return None
-
-            # Update last login
-            cursor.execute(
-                """
-                UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?
-            """,
-                (user_id,),
-            )
-            conn.commit()
-            conn.close()
-
-            return {
-                "id": user_id,
-                "email": email,
-                "plan": plan,
-                "created_at": created_at,
-                "plan_activation_date": plan_activation_date,
-            }
-
+            with self.Session() as session:
+                user = session.query(User).filter_by(email=email).first()
+                if (
+                    not user
+                    or not user.is_active
+                    or not self.verify_password(password, user.password_hash)
+                ):
+                    return None
+                user.last_login = datetime.utcnow()
+                session.commit()
+                user_data = {
+                    "id": user.id,
+                    "email": user.email,
+                    "plan": user.plan,
+                    "created_at": user.created_at,
+                    "plan_activation_date": user.plan_activation_date,
+                }
+                return user_data
         except Exception as e:
             logger.error(f"Error authenticating user: {e}")
             return None
@@ -201,20 +110,15 @@ class AuthService:
     def _store_token(self, user_id: int, jti: str, expires_at: datetime):
         """Store token in database"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute(
-                """
-                INSERT INTO sessions (user_id, token_jti, expires_at)
-                VALUES (?, ?, ?)
-            """,
-                (user_id, jti, expires_at),
-            )
-
-            conn.commit()
-            conn.close()
-
+            with self.Session() as session:
+                session_obj = Session(
+                    user_id=user_id,
+                    token_jti=jti,
+                    expires_at=expires_at,
+                    is_revoked=False,
+                )
+                session.add(session_obj)
+                session.commit()
         except Exception as e:
             logger.error(f"Error storing token: {e}")
 
@@ -248,44 +152,23 @@ class AuthService:
     def _is_token_revoked(self, jti: str) -> bool:
         """Check if token is revoked"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute(
-                """
-                SELECT is_revoked FROM sessions WHERE token_jti = ?
-            """,
-                (jti,),
-            )
-
-            result = cursor.fetchone()
-            conn.close()
-
-            return result[0] if result else True  # Consider missing tokens as revoked
-
+            with self.Session() as session:
+                session_obj = session.query(Session).filter_by(token_jti=jti).first()
+                if not session_obj or session_obj.is_revoked:
+                    return True
         except Exception as e:
-            logger.error(f"Error checking token revocation: {e}")
-            return True
+            logger.error(f"Error checking if token is revoked: {e}")
+        return False
 
     def revoke_token(self, jti: str) -> bool:
         """Revoke a specific token"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute(
-                """
-                UPDATE sessions SET is_revoked = 1 WHERE token_jti = ?
-            """,
-                (jti,),
-            )
-
-            conn.commit()
-            conn.close()
-
-            logger.info(f"Token revoked: {jti}")
-            return True
-
+            with self.Session() as session:
+                session_obj = session.query(Session).filter_by(token_jti=jti).first()
+                if session_obj:
+                    session_obj.is_revoked = True
+                    session.commit()
+                    return True
         except Exception as e:
             logger.error(f"Error revoking token: {e}")
             return False
@@ -293,22 +176,12 @@ class AuthService:
     def revoke_user_tokens(self, user_id: int) -> bool:
         """Revoke all tokens for a user"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute(
-                """
-                UPDATE sessions SET is_revoked = 1 WHERE user_id = ?
-            """,
-                (user_id,),
-            )
-
-            conn.commit()
-            conn.close()
-
-            logger.info(f"All tokens revoked for user: {user_id}")
+            with self.Session() as session:
+                session.query(Session).filter_by(user_id=user_id).update(
+                    {"is_revoked": True}
+                )
+                session.commit()
             return True
-
         except Exception as e:
             logger.error(f"Error revoking user tokens: {e}")
             return False
@@ -316,32 +189,20 @@ class AuthService:
     def get_user(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Get user by ID"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute(
-                """
-                SELECT id, email, plan, created_at, last_login, is_active, plan_activation_date
-                FROM users WHERE id = ?
-            """,
-                (user_id,),
-            )
-
-            user = cursor.fetchone()
-            conn.close()
-
-            if not user:
-                return None
-
-            return {
-                "id": user[0],
-                "email": user[1],
-                "plan": user[2],
-                "created_at": user[3],
-                "last_login": user[4],
-                "is_active": bool(user[5]),
-            }
-
+            with self.Session() as session:
+                user = session.query(User).filter_by(id=user_id).first()
+                if not user:
+                    return None
+                user_data = {
+                    "id": user.id,
+                    "email": user.email,
+                    "plan": user.plan,
+                    "created_at": user.created_at,
+                    "last_login": user.last_login,
+                    "is_active": user.is_active,
+                    "plan_activation_date": user.plan_activation_date,
+                }
+            return user_data
         except Exception as e:
             logger.error(f"Error getting user: {e}")
             return None
@@ -349,22 +210,13 @@ class AuthService:
     def update_user_plan(self, user_id: int, new_plan: str) -> bool:
         """Update user's subscription plan"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute(
-                """
-                UPDATE users SET plan = ? WHERE id = ?
-            """,
-                (new_plan, user_id),
-            )
-
-            conn.commit()
-            conn.close()
-
-            logger.info(f"User {user_id} plan updated to {new_plan}")
-            return True
-
+            with self.Session() as session:
+                user = session.query(User).filter_by(id=user_id).first()
+                if user:
+                    user.plan = new_plan
+                    session.commit()
+                    return True
+            return False
         except Exception as e:
             logger.error(f"Error updating user plan: {e}")
             return False
