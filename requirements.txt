@@ -16,4 +16,8 @@ flask==2.3.3
 soundfile==0.12.1
 websockets==12.0
 asyncio-mqtt==0.16.1
-pyaudio==0.2.14
+pyaudio[email]==0.2.14
+PyJWT==2.8.0
+bcrypt==4.1.2
+sqlalchemy==2.0.23
+alembic==1.13.1

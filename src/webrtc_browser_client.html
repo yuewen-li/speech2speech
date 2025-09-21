@@ -1,35 +1,79 @@
 <!doctype html>
 <meta charset="utf-8" />
 <body>
-<label for="lang">Language:</label>
-<select id="lang">
-  <option value="en-US" selected>English (US)</option>
-  <option value="zh-CN">中文 (普通话)</option>
-</select>
-<br><br>
-<label for="responseMode">Response Mode:</label>
-<select id="responseMode">
-  <option value="both" selected>Both Transcript & Audio</option>
-  <option value="transcript_only">Transcript Only</option>
-</select>
-<br><br>
-<button id="start">Start</button>
-<div id="status" style="margin-top:8px; font-size:12px; color:#666;"></div>
-<div id="panel" style="display:flex; gap:12px; margin-top:12px;">
-  <div style="flex:1;">
-    <div style="font-weight:bold; margin-bottom:6px;">Transcripts</div>
-    <div id="transcripts" style="border:1px solid #ddd; border-radius:6px; padding:8px; height:220px; overflow:auto; font-family:system-ui, sans-serif;"></div>
-  </div>
+<div id="login-container">
+  <label for="email">Email:</label>
+  <input type="email" id="email" value="test@example.com">
+  <br><br>
+  <label for="password">Password:</label>
+  <input type="password" id="password" value="password">
+  <br><br>
+  <button id="login">Login</button>
+  <div id="login-status" style="margin-top:8px; font-size:12px; color:#666;"></div>
 </div>
-<audio id="remote" autoplay></audio>
+<hr>
+<div id="main-container" style="display:none;">
+  <label for="lang">Language:</label>
+  <select id="lang">
+    <option value="en-US" selected>English (US)</option>
+    <option value="zh-CN">中文 (普通话)</option>
+  </select>
+  <br><br>
+  <label for="responseMode">Response Mode:</label>
+  <select id="responseMode">
+    <option value="both" selected>Both Transcript & Audio</option>
+    <option value="transcript_only">Transcript Only</option>
+  </select>
+  <br><br>
+  <button id="start">Start</button>
+  <div id="status" style="margin-top:8px; font-size:12px; color:#666;"></div>
+  <div id="panel" style="display:flex; gap:12px; margin-top:12px;">
+    <div style="flex:1;">
+      <div style="font-weight:bold; margin-bottom:6px;">Transcripts</div>
+      <div id="transcripts" style="border:1px solid #ddd; border-radius:6px; padding:8px; height:220px; overflow:auto; font-family:system-ui, sans-serif;"></div>
+    </div>
+  </div>
+  <audio id="remote" autoplay></audio>
+</div>
 <script>
 const WS_URL = 'ws://localhost:8000';
-const TOKEN = 'SECRET_WS_TOKEN';
+const AUTH_URL = 'http://localhost:8002';
 
 let ws;
 let pc;
 let started = false;
 let transcriptChannel;
+let jwtToken;
+
+document.getElementById('login').onclick = async () => {
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  const loginStatus = document.getElementById('login-status');
+
+  try {
+    const response = await fetch(`${AUTH_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      jwtToken = data.access_token;
+      loginStatus.textContent = 'Login successful!';
+      loginStatus.style.color = 'green';
+      document.getElementById('login-container').style.display = 'none';
+      document.getElementById('main-container').style.display = 'block';
+    } else {
+      const error = await response.text();
+      loginStatus.textContent = `Login failed: ${error}`;
+      loginStatus.style.color = 'red';
+    }
+  } catch (error) {
+    loginStatus.textContent = `Login error: ${error}`;
+    loginStatus.style.color = 'red';
+  }
+};
 
 document.getElementById('start').onclick = async () => {
   if (started) return; started = true;
@@ -38,7 +82,7 @@ document.getElementById('start').onclick = async () => {
   ws.onopen = async () => {
     const LANGUAGE = document.getElementById('lang').value;
     const RESPONSE_MODE = document.getElementById('responseMode').value;
-    ws.send(JSON.stringify({ token: TOKEN, language: LANGUAGE, response_mode: RESPONSE_MODE }));
+    ws.send(JSON.stringify({ token: jwtToken, language: LANGUAGE, response_mode: RESPONSE_MODE }));
     ws.send(JSON.stringify({ type: 'start_streaming' }));
     
     // Update status

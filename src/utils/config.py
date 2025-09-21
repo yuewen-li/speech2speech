@@ -19,14 +19,18 @@ class Config:
     HOST = os.getenv("HOST", "0.0.0.0")
     PORT = int(os.getenv("PORT", "8000"))
 
-    # Simple bearer token for WebSocket auth
-    WS_TOKEN = os.getenv("WS_TOKEN", "SECRET_WS_TOKEN")
+    # JWT Authentication settings
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+    JWT_ALGORITHM = "HS256"
+    JWT_EXPIRY_HOURS = int(os.getenv("JWT_EXPIRY_HOURS", "1"))
 
     # Optional ICE servers for WebRTC
     # Comma-separated URLs, e.g.:
     # "stun:stun.l.google.com:19302,stun:global.stun.twilio.com:3478"
     ICE_SERVERS = [
-        s.strip() for s in os.getenv("ICE_SERVERS", "stun:stun.l.google.com:19302").split(",") if s.strip()
+        s.strip()
+        for s in os.getenv("ICE_SERVERS", "stun:stun.l.google.com:19302").split(",")
+        if s.strip()
     ]
 
     ZH_TO_EN_PROMPT = """

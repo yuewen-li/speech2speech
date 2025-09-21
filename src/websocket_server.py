@@ -9,6 +9,8 @@ from src.service.transcription_service import StreamingSpeechService
 from src.service.translation_service import TranslationService
 from src.service.tts_service import TTSService
 from src.utils.config import Config
+from src.service.auth_service import AuthService
+from src.auth_api import Plan
 
 # WebRTC imports
 from aiortc import (
@@ -34,6 +36,7 @@ class StreamingTranslationServer:
         self.gemini_api_key = gemini_api_key
         self.translation_service = TranslationService(gemini_api_key)
         self.tts_service = TTSService()
+        self.auth_service = AuthService()
 
         # Active connections
         self.active_connections: Set[websockets.WebSocketServerProtocol] = set()
@@ -49,9 +52,11 @@ class StreamingTranslationServer:
             websockets.WebSocketServerProtocol, MediaStreamTrack
         ] = {}
         self.ws_to_data_channel: Dict[websockets.WebSocketServerProtocol, object] = {}
-        
+
         # Response mode preferences per connection
-        self.connection_response_modes: Dict[websockets.WebSocketServerProtocol, str] = {}
+        self.connection_response_modes: Dict[
+            websockets.WebSocketServerProtocol, str
+        ] = {}
 
     async def handle_connection(self, websocket):
         """Handle new WebSocket connection"""
@@ -60,22 +65,32 @@ class StreamingTranslationServer:
             self.active_connections.add(websocket)
             init_msg = await websocket.recv()
             data = json.loads(init_msg)
-            # Simple token auth
+
+            # JWT authentication
             token = data.get("token")
-            if Config.WS_TOKEN and token != Config.WS_TOKEN:
-                await websocket.close(code=4401, reason="Unauthorized")
+            if not token:
+                await websocket.close(code=4401, reason="Unauthorized: Missing token")
                 return
+
+            user_data = self.auth_service.verify_token(token)
+            if not user_data or user_data.get("plan") == Plan.LIMITED.value:
+                await websocket.close(code=4401, reason="Unauthorized: Cannot access")
+                return
+            logger.info(f"User {user_data['email']} authenticated successfully")
+
             language = data.get("language", "en-US")
-            response_mode = data.get("response_mode", "both")  # "transcript_only" or "both"
-            
+            response_mode = data.get("response_mode", "transcript_only")
+
             # Validate response_mode
             if response_mode not in ["transcript_only", "both"]:
-                response_mode = "both"
-                logger.warning(f"Invalid response_mode, defaulting to 'both': {data.get('response_mode')}")
-            
+                response_mode = "transcript_only"
+                logger.warning(
+                    f"Invalid response_mode, defaulting to 'transcript_only': {data.get('response_mode')}"
+                )
+
             # Store response mode preference
             self.connection_response_modes[websocket] = response_mode
-            
+
             logger.info(
                 f"New connection from {websocket.remote_address} for language: {language}, response_mode: {response_mode}"
             )
@@ -197,7 +212,7 @@ class StreamingTranslationServer:
                 return
             pc = RTCPeerConnection()
             self.ws_to_pc[websocket] = pc
-            
+
             # Handle client-initiated data channel
             @pc.on("datachannel")
             async def on_datachannel(channel):
@@ -249,11 +264,11 @@ class StreamingTranslationServer:
             await pc.setRemoteDescription(
                 RTCSessionDescription(sdp=sdp["sdp"], type=sdp["type"])
             )
-            
+
             # Create an answer
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
-            
+
             # Reply with SDP answer
             resp = {
                 "type": "webrtc_answer",
@@ -326,11 +341,15 @@ class StreamingTranslationServer:
                         if tts_track and hasattr(tts_track, "enqueue_wav_bytes"):
                             await tts_track.enqueue_wav_bytes(audio_bytes)
                         else:
-                            logger.warning("No WebRTC TTS track; unable to deliver audio")
+                            logger.warning(
+                                "No WebRTC TTS track; unable to deliver audio"
+                            )
                     else:
                         logger.error("TTS service failed to generate audio.")
                 else:
-                    logger.debug(f"Response mode is '{response_mode}', skipping TTS audio generation")
+                    logger.debug(
+                        f"Response mode is '{response_mode}', skipping TTS audio generation"
+                    )
 
                 # Send transcript over data channel if available
                 channel = self.ws_to_data_channel.get(websocket)
@@ -370,7 +389,7 @@ class StreamingTranslationServer:
 
             # Remove from active connections
             self.active_connections.discard(websocket)
-            
+
             # Remove response mode preference
             self.connection_response_modes.pop(websocket, None)
 
