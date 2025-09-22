@@ -11,5 +11,4 @@ class User(Base):
     plan = Column(String, default="trial")
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime)
-    is_active = Column(Boolean, default=True)
     premium_start_date = Column(DateTime, nullable=True)

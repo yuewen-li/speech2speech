@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class AuthService:
     """JWT-based authentication service with SQLite user storage"""
 
-    def __init__(self, db_url="sqlite:///users.db"):
+    def __init__(self, db_url="sqlite:///speech2speech.db"):
         self.secret_key = Config.JWT_SECRET_KEY
         self.algorithm = Config.JWT_ALGORITHM
         self.token_expiry_hours = Config.JWT_EXPIRY_HOURS
@@ -63,11 +63,7 @@ class AuthService:
         try:
             with self.Session() as session:
                 user = session.query(User).filter_by(email=email).first()
-                if (
-                    not user
-                    or not user.is_active
-                    or not self.verify_password(password, user.password_hash)
-                ):
+                if not user or not self.verify_password(password, user.password_hash):
                     return None
                 user.last_login = datetime.utcnow()
                 session.commit()
@@ -76,7 +72,7 @@ class AuthService:
                     "email": user.email,
                     "plan": user.plan,
                     "created_at": user.created_at,
-                    "plan_activation_date": user.plan_activation_date,
+                    "premium_start_date": user.premium_start_date,
                 }
                 return user_data
         except Exception as e:
@@ -158,7 +154,7 @@ class AuthService:
                     return True
         except Exception as e:
             logger.error(f"Error checking if token is revoked: {e}")
-        return False
+            return False
 
     def revoke_token(self, jti: str) -> bool:
         """Revoke a specific token"""
@@ -199,10 +195,9 @@ class AuthService:
                     "plan": user.plan,
                     "created_at": user.created_at,
                     "last_login": user.last_login,
-                    "is_active": user.is_active,
-                    "plan_activation_date": user.plan_activation_date,
+                    "premium_start_date": user.premium_start_date,
                 }
-            return user_data
+                return user_data
         except Exception as e:
             logger.error(f"Error getting user: {e}")
             return None
@@ -212,14 +207,14 @@ class AuthService:
         try:
             with self.Session() as session:
                 user = session.query(User).filter_by(id=user_id).first()
-                if user:
-                    user.plan = new_plan
-                    session.commit()
-                    return True
-            return False
+                if not user:
+                    logger.error(f"User {user_id} does not exist")
+                    raise ValueError("User does not exist")
+                user.plan = new_plan
+                session.commit()
         except Exception as e:
             logger.error(f"Error updating user plan: {e}")
-            return False
+            raise e
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 import logging
 from src.service.auth_service import AuthService
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ auth_service = AuthService()
 security = HTTPBearer()
 
 
-class Plan(str):
+class Plan(Enum):
     TRIAL = "trial"
     PREMIUM = "premium"
     LIMITED = "limited"
@@ -56,9 +57,9 @@ class UserInfo(BaseModel):
     id: int
     email: str
     plan: str
-    created_at: str
-    last_login: Optional[str]
-    is_active: bool
+    created_at: datetime
+    last_login: Optional[datetime]
+    premium_start_date: Optional[datetime]
 
 
 class TokenRevoke(BaseModel):
@@ -84,17 +85,13 @@ async def get_current_user(
 
 def check_and_update_plan(user):
     now = datetime.utcnow()
-    if user.plan == Plan.TRIAL.value:
-        signup_date = datetime.strptime(user.created_at, "%Y-%m-%d %H:%M:%S")
-        if now - signup_date > timedelta(days=7):
-            auth_service.update_user_plan(user.id, Plan.LIMITED.value)
-    elif user.plan == Plan.PREMIUM.value:
-        plan_activation_date = datetime.strptime(
-            user.plan_activation_date, "%Y-%m-%d %H:%M:%S"
-        )
-        if now - plan_activation_date > timedelta(days=30):
-            auth_service.update_user_plan(user.id, Plan.LIMITED.value)
-    return user.plan
+    if user["plan"] == Plan.TRIAL.value:
+        if now - user["created_at"] > timedelta(days=7):
+            auth_service.update_user_plan(user["id"], Plan.LIMITED.value)
+    elif user["plan"] == Plan.PREMIUM.value:
+        if now - user["premium_start_date"] > timedelta(days=30):
+            auth_service.update_user_plan(user["id"], Plan.LIMITED.value)
+    return user["plan"]
 
 
 # Auth endpoints
